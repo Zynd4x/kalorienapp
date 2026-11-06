@@ -56,7 +56,7 @@ Der QR-Code enthält dann eine öffentliche `*.exp.direct`-Adresse und funktioni
 
 ## Gemeinsame Einkaufsliste
 
-Die gemeinsame Liste läuft über eine API-Route des Expo-Dev-Servers (`/api/shopping`). Dadurch ist keine zusätzliche Anmeldung bei einem externen Dienst nötig.
+Die gemeinsame Liste läuft über einen eigenen Synchronisierungs-Server (`server/sync-server.ts`), der die Räume in einer MongoDB speichert. Die App bringt die Server-Adresse bereits mit, daher ist keine Eingabe einer Server-Adresse nötig. Die Einrichtung ist weiter unten unter **Gemeinsame Liste: ohne Server-Eingabe** beschrieben.
 
 **Raum erstellen**
 
@@ -75,8 +75,8 @@ Die App gleicht die Liste alle zwei Sekunden automatisch ab. Änderungen erschei
 
 **Wichtig:**
 
-- Die Synchronisierung funktioniert nur, solange der Dev-Server auf dem Rechner läuft. Ist er beendet, arbeitet die App mit der lokalen Liste weiter und verbindet sich nach dem nächsten Start automatisch wieder.
-- Raumdaten liegen serverseitig in `.data/shopping-rooms.json` (wird nicht in Git eingecheckt). Passwörter werden nur als gesalzener `scrypt`-Hash gespeichert.
+- Die Synchronisierung funktioniert, solange der Server erreichbar ist. Ist er nicht erreichbar, arbeitet die App mit der lokalen Liste weiter und verbindet sich automatisch wieder, sobald der Server antwortet.
+- Raumdaten liegen in der MongoDB des Synchronisierungs-Servers (z. B. MongoDB Atlas). Passwörter werden nur als gesalzener `scrypt`-Hash gespeichert.
 - Beim Verlassen bleiben die aktuellen Artikel lokal erhalten; nur die Verbindung zum Raum wird getrennt.
 
 ## APK bauen und auf Android installieren
