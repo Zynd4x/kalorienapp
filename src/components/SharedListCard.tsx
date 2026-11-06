@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Card } from './ui';
 import { useApp } from '../context/AppContext';
+import { loadSyncServerUrl, saveSyncServerUrl } from '../api/syncServerSetting';
+import { DEFAULT_SYNC_SERVER_URL, formatSyncServer } from '../config/syncServer';
 import { colors, radius, spacing, typography } from '../theme';
 import { successFeedback } from '../lib/haptics';
 import type { SharedStatus } from '../types';
@@ -51,16 +53,31 @@ export function SharedListCard() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [serverUrl, setServerUrl] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (sharedConnection?.name) setName(sharedConnection.name);
   }, [sharedConnection?.name]);
+
+  useEffect(() => {
+    let active = true;
+    loadSyncServerUrl().then((value) => {
+      if (active) setServerUrl(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const submit = async () => {
     if (busy) return;
     setBusy(true);
     setFormError(null);
     try {
+      // Die Adresse zuerst sichern: Sie bestimmt, wohin die Anfrage geht.
+      await saveSyncServerUrl(serverUrl);
+
       const result =
         mode === 'create'
           ? await createSharedRoom(name, password)
@@ -109,6 +126,21 @@ export function SharedListCard() {
   };
 
   const confirmLeave = () => {
+    if (Platform.OS === 'web') {
+      // Alert.alert unterstützt im Web keine Buttons, daher window.confirm.
+      const canAsk =
+        typeof window !== 'undefined' && typeof window.confirm === 'function';
+      if (
+        !canAsk ||
+        window.confirm(
+          'Gemeinsame Liste verlassen?\n\nDeine Artikel bleiben lokal erhalten. Die Verbindung zum Raum wird getrennt.',
+        )
+      ) {
+        void leaveSharedRoom();
+      }
+      return;
+    }
+
     Alert.alert(
       'Gemeinsame Liste verlassen?',
       'Deine Artikel bleiben lokal erhalten. Die Verbindung zum Raum wird getrennt.',
@@ -351,6 +383,62 @@ export function SharedListCard() {
         zusammengeführt. Beide Geräte können gleichzeitig Artikel hinzufügen,
         abhaken und löschen.
       </Text>
+
+      <Pressable
+        onPress={() => setShowAdvanced((value) => !value)}
+        hitSlop={8}
+        style={({ pressed }) => [
+          styles.advancedToggle,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Ionicons
+          name={showAdvanced ? 'chevron-up' : 'chevron-down'}
+          size={14}
+          color={colors.muted}
+        />
+        <Text style={styles.advancedToggleText}>Erweitert</Text>
+      </Pressable>
+
+      {showAdvanced ? (
+        <View style={styles.serverBlock}>
+          <Text style={styles.serverLabel}>Server-Adresse</Text>
+          <TextInput
+            value={serverUrl}
+            onChangeText={setServerUrl}
+            onEndEditing={() => {
+              void saveSyncServerUrl(serverUrl);
+            }}
+            placeholder={formatSyncServer(DEFAULT_SYNC_SERVER_URL)}
+            placeholderTextColor={colors.muted}
+            style={styles.input}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          <Text style={styles.serverHint}>
+            {serverUrl
+              ? 'Eigene Adresse aktiv. Leeren, um wieder den eingebauten Server zu nutzen.'
+              : `Leer lassen – die App nutzt automatisch ${formatSyncServer(DEFAULT_SYNC_SERVER_URL)}.`}
+          </Text>
+          {serverUrl ? (
+            <Pressable
+              onPress={() => {
+                setServerUrl('');
+                void saveSyncServerUrl('');
+              }}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.resetServer,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="refresh-outline" size={14} color={colors.primary} />
+              <Text style={styles.resetServerText}>Auf Standard zurücksetzen</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </Card>
   );
 }
@@ -450,6 +538,49 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: colors.muted,
     marginTop: 2,
+  },
+  serverBlock: {
+    gap: 6,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  serverLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    color: colors.muted,
+    textTransform: 'uppercase',
+  },
+  serverHint: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.muted,
+  },
+  advancedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: spacing.xs,
+    paddingVertical: 4,
+  },
+  advancedToggleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.muted,
+  },
+  resetServer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+  },
+  resetServerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
   },
   connectedCard: {
     gap: spacing.md,

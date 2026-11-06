@@ -1,5 +1,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { getSyncServerUrl } from './syncServerSetting';
+import { DEFAULT_SYNC_SERVER_URL, formatSyncServer } from '../config/syncServer';
 import type { SharedRoomState, ShoppingItem } from '../types';
 
 export interface ShoppingRequestBase {
@@ -105,10 +107,20 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
+function looksLikeHost(host: string): boolean {
+  const withoutPort = host.replace(/:\d+$/, '');
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(withoutPort)) return true;
+  if (/^\[[0-9a-f:]+\]$/i.test(withoutPort)) return true;
+  if (withoutPort.toLowerCase() === 'localhost') return true;
+  return withoutPort.includes('.');
+}
+
 function baseUrlFromHostUri(hostUri: string): string | null {
   const cleaned = hostUri.trim().replace(/^[a-z]+:\/\//i, '');
   const host = cleaned.split('/')[0];
-  if (!host) return null;
+  // Im eigenständigen Build liefert linkingUri nur das App-Schema
+  // ("kalorienkompass://"). Solche Werte sind keine Server-Adresse.
+  if (!host || !looksLikeHost(host)) return null;
   const isTunnel =
     host.includes('.exp.direct') ||
     host.includes('.exp.host') ||
@@ -117,21 +129,24 @@ function baseUrlFromHostUri(hostUri: string): string | null {
 }
 
 /**
- * Ermittelt die Adresse des Dev-Servers. Im Tunnel-Modus ist das die
- * öffentliche *.exp.direct-Adresse, im LAN-Modus die lokale IP.
- * Für einen deployten Server kann EXPO_PUBLIC_SYNC_URL gesetzt werden.
+ * Ermittelt die Server-Adresse der gemeinsamen Liste.
+ *
+ * Reihenfolge:
+ *   1. Adresse, die in der App unter "Erweitert" gespeichert wurde
+ *   2. EXPO_PUBLIC_SYNC_URL (beim Build gesetzt)
+ *   3. Dev-Server (nur waehrend "npm start")
+ *   4. Eigene Web-Adresse (nur im Browser)
+ *   5. Fest hinterlegte Standard-Adresse
+ *
+ * Dadurch funktioniert die gemeinsame Liste im fertigen APK ohne jede
+ * Eingabe einer Server-Adresse.
  */
 export function getSyncBaseUrl(): string {
+  const runtime = getSyncServerUrl();
+  if (runtime) return stripTrailingSlash(runtime);
+
   const configured = process.env.EXPO_PUBLIC_SYNC_URL?.trim();
   if (configured) return stripTrailingSlash(configured);
-
-  if (
-    Platform.OS === 'web' &&
-    typeof window !== 'undefined' &&
-    window.location?.origin
-  ) {
-    return stripTrailingSlash(window.location.origin);
-  }
 
   const hostUri = Constants.expoConfig?.hostUri;
   if (hostUri) {
@@ -145,12 +160,22 @@ export function getSyncBaseUrl(): string {
     if (fromLinking) return fromLinking;
   }
 
-  return '';
+  if (
+    Platform.OS === 'web' &&
+    typeof window !== 'undefined' &&
+    window.location?.origin
+  ) {
+    return stripTrailingSlash(window.location.origin);
+  }
+
+  return stripTrailingSlash(DEFAULT_SYNC_SERVER_URL);
 }
 
 export async function sendShoppingRequest(
   payload: ShoppingOperationPayload,
-  timeoutMs = 12000,
+  // Grosszuegig, weil der kostenlose Hosting-Tarif den Server erst beim ersten
+  // Aufruf startet. Das kann bis zu einer Minute dauern.
+  timeoutMs = 40000,
 ): Promise<ShoppingResponse> {
   const baseUrl = getSyncBaseUrl();
   if (!baseUrl) {
@@ -158,7 +183,7 @@ export async function sendShoppingRequest(
       ok: false,
       error: 'NO_SERVER',
       message:
-        'Der Synchronisierungs-Server wurde nicht gefunden. Starte die App mit "npm start" neu.',
+        'Für die gemeinsame Liste ist keine Server-Adresse hinterlegt. Trage sie unter „Erweitert“ ein.',
     };
   }
 
@@ -210,8 +235,8 @@ export async function sendShoppingRequest(
       ok: false,
       error: timedOut ? 'TIMEOUT' : 'NETWORK',
       message: timedOut
-        ? 'Der Server antwortet gerade nicht. Die App versucht es weiter.'
-        : 'Keine Verbindung zum Server. Die App versucht es weiter.',
+        ? `Der Server ${formatSyncServer(baseUrl)} antwortet nicht. Beim kostenlosen Tarif kann der erste Start bis zu einer Minute dauern – bitte gleich noch einmal versuchen.`
+        : `Keine Verbindung zu ${formatSyncServer(baseUrl)}. Prüfe die Internetverbindung und versuche es erneut.`,
     };
   } finally {
     clearTimeout(timeout);

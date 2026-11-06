@@ -1,0 +1,21 @@
+# Render-Blueprint fuer den Synchronisierungs-Server der gemeinsamen Liste.
+#
+# Einmalig in Render: "New +" -> "Blueprint" -> dieses Repository auswaehlen.
+# Render liest diese Datei und legt den Dienst automatisch an.
+#
+# Danach nur noch MONGODB_URI als Umgebungsvariable eintragen
+# (MongoDB Atlas Connection String).
+services:
+  - type: web
+    name: kalorienkompass-sync
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run sync:server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: MONGODB_URI
+        sync: false

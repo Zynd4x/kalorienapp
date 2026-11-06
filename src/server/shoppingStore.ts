@@ -1,20 +1,7 @@
 /// <reference types="node" />
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import {
-  mkdir,
-  open,
-  readFile,
-  rename,
-  stat,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
-import path from 'node:path';
-import type {
-  SharedRoomState,
-  ShoppingCategory,
-  ShoppingItem,
-} from '../types';
+import { MongoClient, type Collection } from 'mongodb';
+import type { SharedRoomState, ShoppingCategory, ShoppingItem } from '../types';
 
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_CODE_LENGTH = 6;
@@ -26,6 +13,9 @@ const MAX_ITEM_AMOUNT = 60;
 const MAX_ID = 120;
 const MIN_PASSWORD_LENGTH = 4;
 const MAX_PASSWORD_LENGTH = 100;
+
+const DB_NAME = 'kalorienkompass';
+const COLLECTION_NAME = 'rooms';
 
 const CATEGORIES: ShoppingCategory[] = [
   'Obst & Gemüse',
@@ -39,6 +29,7 @@ const CATEGORIES: ShoppingCategory[] = [
 ];
 
 interface StoredRoom {
+  _id: string;
   code: string;
   passwordHash: string;
   createdAt: number;
@@ -46,15 +37,6 @@ interface StoredRoom {
   version: number;
   items: ShoppingItem[];
   appliedOps: string[];
-}
-
-interface StoreFile {
-  rooms: Record<string, StoredRoom>;
-}
-
-interface StoreMutation<T> {
-  result: T;
-  changed: boolean;
 }
 
 export interface ShoppingApiSuccess {
@@ -71,119 +53,46 @@ export interface ShoppingApiFailure {
 
 export type ShoppingApiResponse = ShoppingApiSuccess | ShoppingApiFailure;
 
-const DATA_DIR =
-  process.env.SHOPPING_DATA_DIR?.trim() ||
-  path.join(process.cwd(), '.data');
-const DATA_FILE = path.join(DATA_DIR, 'shopping-rooms.json');
-const LOCK_FILE = path.join(DATA_DIR, 'shopping-rooms.lock');
-const LOCK_TIMEOUT_MS = 15000;
-const LOCK_STALE_MS = 30000;
+let clientPromise: Promise<MongoClient> | null = null;
+let roomsPromise: Promise<Collection<StoredRoom>> | null = null;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function mongoUri(): string {
+  const configured = process.env.MONGODB_URI?.trim();
+  if (configured) return configured;
+  // Im Betrieb niemals stillschweigend auf localhost zeigen: Dort laeuft auf
+  // einem Hosting-Server keine Datenbank, der Fehler waere sonst unklar.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('MONGODB_URI_MISSING');
+  }
+  return 'mongodb://127.0.0.1:27017';
 }
 
-async function acquireFileLock(): Promise<() => Promise<void>> {
-  await mkdir(DATA_DIR, { recursive: true });
-  const startedAt = Date.now();
+function resetConnection(): void {
+  clientPromise = null;
+  roomsPromise = null;
+}
 
-  while (true) {
-    try {
-      const handle = await open(LOCK_FILE, 'wx');
-      await handle.writeFile(`${process.pid}:${Date.now()}`, 'utf8');
-      await handle.close();
-      return async () => {
-        try {
-          await unlink(LOCK_FILE);
-        } catch {
-          // Die Sperre wurde bereits entfernt.
-        }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error;
+async function getRooms(): Promise<Collection<StoredRoom>> {
+  if (!roomsPromise) {
+    roomsPromise = (async () => {
+      if (!clientPromise) {
+        clientPromise = MongoClient.connect(mongoUri(), {
+          serverSelectionTimeoutMS: 8000,
+          connectTimeoutMS: 8000,
+          socketTimeoutMS: 20000,
+          maxPoolSize: 10,
+          appName: 'kalorienkompass-sync',
+        });
       }
-
-      try {
-        const info = await stat(LOCK_FILE);
-        if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
-          try {
-            await unlink(LOCK_FILE);
-          } catch {
-            // Ein anderer Prozess war schneller.
-          }
-          continue;
-        }
-      } catch {
-        // Die Sperre wurde zwischenzeitlich freigegeben.
-        continue;
-      }
-
-      if (Date.now() - startedAt > LOCK_TIMEOUT_MS) {
-        // Notfall-Freigabe, damit die Anfrage nicht dauerhaft hängt.
-        try {
-          await unlink(LOCK_FILE);
-        } catch {
-          // Ignorieren und erneut versuchen.
-        }
-        continue;
-      }
-
-      await sleep(8 + Math.floor(Math.random() * 18));
-    }
+      const client = await clientPromise;
+      return client.db(DB_NAME).collection<StoredRoom>(COLLECTION_NAME);
+    })().catch((error: unknown) => {
+      // Der naechste Aufruf darf einen neuen Verbindungsversuch starten.
+      resetConnection();
+      throw error;
+    });
   }
-}
-
-async function withLock<T>(task: () => Promise<T>): Promise<T> {
-  const release = await acquireFileLock();
-  try {
-    return await task();
-  } finally {
-    await release();
-  }
-}
-
-async function readStore(): Promise<StoreFile> {
-  try {
-    const raw = await readFile(DATA_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<StoreFile>;
-    if (parsed && parsed.rooms && typeof parsed.rooms === 'object') {
-      return { rooms: parsed.rooms };
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      console.warn('[shoppingStore] Datendatei konnte nicht gelesen werden:', error);
-    }
-  }
-  return { rooms: {} };
-}
-
-async function writeStore(data: StoreFile): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
-  const payload = JSON.stringify(data);
-  const tempFile = `${DATA_FILE}.${process.pid}.tmp`;
-  await writeFile(tempFile, payload, 'utf8');
-  try {
-    await rename(tempFile, DATA_FILE);
-  } catch {
-    await writeFile(DATA_FILE, payload, 'utf8');
-  }
-}
-
-async function mutate(
-  task: (
-    data: StoreFile,
-  ) => StoreMutation<ShoppingApiResponse> | Promise<StoreMutation<ShoppingApiResponse>>,
-): Promise<ShoppingApiResponse> {
-  return withLock(async () => {
-    const data = await readStore();
-    const mutation = await task(data);
-    if (mutation.changed) {
-      await writeStore(data);
-    }
-    return mutation.result;
-  });
+  return roomsPromise;
 }
 
 function cleanText(value: unknown, maxLength: number): string {
@@ -234,14 +143,28 @@ function verifyPassword(password: string, stored: string): boolean {
   }
 }
 
-function generateRoomCode(rooms: Record<string, StoredRoom>): string {
+function isDuplicateKey(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: number }).code === 11000
+  );
+}
+
+async function generateRoomCode(
+  rooms: Collection<StoredRoom>,
+): Promise<string> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const bytes = randomBytes(ROOM_CODE_LENGTH);
     let code = '';
     for (let index = 0; index < ROOM_CODE_LENGTH; index += 1) {
       code += ROOM_CODE_ALPHABET[bytes[index] % ROOM_CODE_ALPHABET.length];
     }
-    if (!rooms[code]) return code;
+    const existing = await rooms.findOne(
+      { _id: code },
+      { projection: { _id: 1 } },
+    );
+    if (!existing) return code;
   }
   return randomBytes(5).toString('hex').toUpperCase();
 }
@@ -278,51 +201,27 @@ function sanitizeItem(value: unknown): ShoppingItem | null {
   };
 }
 
-function mergeItems(
-  existing: ShoppingItem[],
-  incoming: unknown[],
-): { items: ShoppingItem[]; added: number } {
-  const byId = new Map(existing.map((item) => [item.id, item]));
-  let added = 0;
+function sanitizeItems(value: unknown[]): ShoppingItem[] {
+  const items: ShoppingItem[] = [];
+  const seen = new Set<string>();
 
-  for (const raw of incoming) {
-    if (byId.size >= MAX_ITEMS) break;
+  for (const raw of value.slice(0, MAX_ADD_BATCH)) {
     const item = sanitizeItem(raw);
-    if (!item || byId.has(item.id)) continue;
-    byId.set(item.id, item);
-    added += 1;
+    if (!item || seen.has(item.id)) continue;
+    seen.add(item.id);
+    items.push(item);
   }
 
-  return {
-    items: added === 0 ? existing : Array.from(byId.values()),
-    added,
-  };
+  return items;
 }
 
 function toRoomState(room: StoredRoom): SharedRoomState {
   return {
     room: room.code,
     version: room.version,
-    items: room.items,
+    items: room.items ?? [],
     updatedAt: room.updatedAt,
   };
-}
-
-function touch(room: StoredRoom): void {
-  room.version += 1;
-  room.updatedAt = Date.now();
-}
-
-function markApplied(room: StoredRoom, opId: string): void {
-  if (!opId) return;
-  room.appliedOps.push(opId);
-  if (room.appliedOps.length > MAX_APPLIED_OPS) {
-    room.appliedOps.splice(0, room.appliedOps.length - MAX_APPLIED_OPS);
-  }
-}
-
-function alreadyApplied(room: StoredRoom, opId: string): boolean {
-  return room.appliedOps.includes(opId);
 }
 
 function success(state: SharedRoomState): ShoppingApiSuccess {
@@ -337,28 +236,32 @@ function failure(
   return { ok: false, error, message, status };
 }
 
+function roomNotFound(): ShoppingApiFailure {
+  return failure(
+    'ROOM_NOT_FOUND',
+    'Diesen Raum gibt es nicht. Prüfe den Raumcode.',
+    404,
+  );
+}
+
 function readOperationId(body: Record<string, unknown>): string {
   return cleanText(body.opId, 140);
 }
 
-function authenticate(
-  data: StoreFile,
+async function authenticate(
+  rooms: Collection<StoredRoom>,
   roomCode: string,
   password: string,
-): { room: StoredRoom } | ShoppingApiFailure {
+): Promise<{ room: StoredRoom } | ShoppingApiFailure> {
   if (!roomCode) {
     return failure('BAD_REQUEST', 'Bitte gib einen Raumcode ein.');
   }
   if (!password) {
     return failure('BAD_REQUEST', 'Bitte gib das Passwort für den Raum ein.');
   }
-  const room = data.rooms[roomCode];
+  const room = await rooms.findOne({ _id: roomCode });
   if (!room) {
-    return failure(
-      'ROOM_NOT_FOUND',
-      'Diesen Raum gibt es nicht. Prüfe den Raumcode.',
-      404,
-    );
+    return roomNotFound();
   }
   if (!verifyPassword(password, room.passwordHash)) {
     return failure(
@@ -370,9 +273,103 @@ function authenticate(
   return { room };
 }
 
-export async function handleShoppingOperation(
-  input: unknown,
+/**
+ * Haelt die Liste der bereits angewendeten Vorgaenge kurz. Wichtig fuer die
+ * Idempotenz: Schickt ein Geraet denselben Vorgang zweimal (z. B. nach einem
+ * Verbindungsabbruch), wird er nur einmal angewendet.
+ */
+function appliedOpsPush(opId: string) {
+  return { $each: [opId], $slice: -MAX_APPLIED_OPS };
+}
+
+async function currentState(
+  rooms: Collection<StoredRoom>,
+  roomCode: string,
 ): Promise<ShoppingApiResponse> {
+  const room = await rooms.findOne({ _id: roomCode });
+  if (!room) return roomNotFound();
+  return success(toRoomState(room));
+}
+
+/**
+ * Fuegt Artikel hinzu. Jeder Artikel wird in genau einer atomaren Operation
+ * geschrieben und nur dann, wenn er noch nicht existiert. Dadurch koennen
+ * beliebig viele Geraete gleichzeitig schreiben, ohne dass Eintraege verloren
+ * gehen oder doppelt auftauchen.
+ */
+async function addItems(
+  rooms: Collection<StoredRoom>,
+  roomCode: string,
+  opId: string | null,
+  items: ShoppingItem[],
+): Promise<void> {
+  for (const item of items) {
+    const update: Record<string, unknown> = {
+      $push: {
+        items: { $each: [item], $slice: -MAX_ITEMS },
+      },
+      $inc: { version: 1 },
+      $set: { updatedAt: Date.now() },
+    };
+
+    if (opId) {
+      (update.$push as Record<string, unknown>).appliedOps = appliedOpsPush(opId);
+    }
+
+    await rooms.updateOne(
+      { _id: roomCode, 'items.id': { $ne: item.id } },
+      update,
+    );
+  }
+}
+
+async function createRoom(
+  body: Record<string, unknown>,
+): Promise<ShoppingApiResponse> {
+  const name = cleanText(body.name, 40);
+  const password = normalizePassword(body.password);
+  const problem = passwordProblem(password);
+  if (!name) {
+    return failure('BAD_REQUEST', 'Bitte gib deinen Namen ein.');
+  }
+  if (problem) {
+    return failure('WEAK_PASSWORD', problem);
+  }
+
+  const rooms = await getRooms();
+  const items = sanitizeItems(Array.isArray(body.items) ? body.items : []);
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const code = await generateRoomCode(rooms);
+    const now = Date.now();
+    const room: StoredRoom = {
+      _id: code,
+      code,
+      passwordHash: hashPassword(password),
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      items: items.slice(0, MAX_ITEMS),
+      appliedOps: [],
+    };
+
+    try {
+      await rooms.insertOne(room);
+      return success(toRoomState(room));
+    } catch (error) {
+      // Sehr selten: Zwei Geraete erzeugen gleichzeitig denselben Code.
+      if (!isDuplicateKey(error)) throw error;
+    }
+  }
+
+  return failure(
+    'CONFLICT',
+    'Es konnte kein freier Raumcode erzeugt werden. Bitte versuche es erneut.',
+    409,
+  );
+}
+
+async function runOperation(input: unknown): Promise<ShoppingApiResponse> {
   if (!input || typeof input !== 'object') {
     return failure('BAD_REQUEST', 'Ungültige Anfrage.');
   }
@@ -381,60 +378,29 @@ export async function handleShoppingOperation(
   const op = cleanText(body.op, 30);
 
   if (op === 'create') {
-    const name = cleanText(body.name, 40);
-    const password = normalizePassword(body.password);
-    const problem = passwordProblem(password);
-    if (!name) {
-      return failure('BAD_REQUEST', 'Bitte gib deinen Namen ein.');
-    }
-    if (problem) {
-      return failure('WEAK_PASSWORD', problem);
-    }
-
-    return mutate((data) => {
-      const code = generateRoomCode(data.rooms);
-      const now = Date.now();
-      const merged = mergeItems(
-        [],
-        Array.isArray(body.items) ? body.items : [],
-      );
-      const room: StoredRoom = {
-        code,
-        passwordHash: hashPassword(password),
-        createdAt: now,
-        updatedAt: now,
-        version: 1,
-        items: merged.items,
-        appliedOps: [],
-      };
-      data.rooms[code] = room;
-      return { result: success(toRoomState(room)), changed: true };
-    });
+    return createRoom(body);
   }
 
   const roomCode = normalizeRoom(body.room);
   const password = normalizePassword(body.password);
 
-  if (op === 'join' || op === 'sync') {
-    return mutate((data) => {
-      const auth = authenticate(data, roomCode, password);
-      if ('ok' in auth) return { result: auth, changed: false };
+  const rooms = await getRooms();
+  const auth = await authenticate(rooms, roomCode, password);
+  if ('ok' in auth) {
+    return auth;
+  }
+  const code = auth.room.code;
 
-      const { room } = auth;
-      if (op === 'sync') {
-        return { result: success(toRoomState(room)), changed: false };
-      }
+  if (op === 'sync') {
+    return currentState(rooms, code);
+  }
 
-      const merged = mergeItems(
-        room.items,
-        Array.isArray(body.items) ? body.items : [],
-      );
-      if (merged.added > 0) {
-        room.items = merged.items;
-        touch(room);
-      }
-      return { result: success(toRoomState(room)), changed: merged.added > 0 };
-    });
+  if (op === 'join') {
+    const incoming = sanitizeItems(
+      Array.isArray(body.items) ? body.items : [],
+    );
+    await addItems(rooms, code, null, incoming);
+    return currentState(rooms, code);
   }
 
   const opId = readOperationId(body);
@@ -442,83 +408,109 @@ export async function handleShoppingOperation(
     return failure('BAD_REQUEST', 'Der Vorgang konnte nicht zugeordnet werden.');
   }
 
-  return mutate((data) => {
-    const auth = authenticate(data, roomCode, password);
-    if ('ok' in auth) return { result: auth, changed: false };
+  // Bereits angewendet? Dann nur den aktuellen Stand liefern.
+  if ((auth.room.appliedOps ?? []).includes(opId)) {
+    return success(toRoomState(auth.room));
+  }
 
-    const { room } = auth;
+  if (op === 'add' || op === 'addMany') {
+    const incoming =
+      op === 'add' ? [body.item] : (body.items as unknown[] | undefined) ?? [];
+    await addItems(rooms, code, opId, sanitizeItems(incoming));
+    return currentState(rooms, code);
+  }
 
-    if (alreadyApplied(room, opId)) {
-      return { result: success(toRoomState(room)), changed: false };
+  if (op === 'setChecked') {
+    const itemId = cleanText(body.itemId, MAX_ID);
+    const checked = body.checked === true;
+
+    await rooms.updateOne(
+      {
+        _id: code,
+        items: { $elemMatch: { id: itemId, checked: { $ne: checked } } },
+      },
+      {
+        $set: { 'items.$.checked': checked, updatedAt: Date.now() },
+        $inc: { version: 1 },
+        $push: { appliedOps: appliedOpsPush(opId) },
+      },
+    );
+
+    return currentState(rooms, code);
+  }
+
+  if (op === 'remove') {
+    const itemId = cleanText(body.itemId, MAX_ID);
+
+    if (itemId) {
+      await rooms.updateOne(
+        { _id: code, 'items.id': itemId },
+        {
+          $pull: { items: { id: itemId } },
+          $inc: { version: 1 },
+          $set: { updatedAt: Date.now() },
+          $push: { appliedOps: appliedOpsPush(opId) },
+        },
+      );
     }
 
-    if (op === 'add' || op === 'addMany') {
-      const incoming =
-        op === 'add'
-          ? [body.item]
-          : Array.isArray(body.items)
-            ? body.items.slice(0, MAX_ADD_BATCH)
-            : [];
-      const merged = mergeItems(room.items, incoming);
-      if (merged.added > 0) {
-        room.items = merged.items;
-        touch(room);
-      }
-      markApplied(room, opId);
-      return { result: success(toRoomState(room)), changed: true };
-    }
+    return currentState(rooms, code);
+  }
 
-    if (op === 'setChecked') {
-      const itemId = cleanText(body.itemId, MAX_ID);
-      const checked = body.checked === true;
-      let changed = false;
-      if (itemId) {
-        room.items = room.items.map((item) => {
-          if (item.id !== itemId || item.checked === checked) return item;
-          changed = true;
-          return { ...item, checked };
-        });
-      }
-      if (changed) touch(room);
-      markApplied(room, opId);
-      return { result: success(toRoomState(room)), changed: true };
-    }
-
-    if (op === 'remove') {
-      const itemId = cleanText(body.itemId, MAX_ID);
-      const nextItems = itemId
-        ? room.items.filter((item) => item.id !== itemId)
-        : room.items;
-      if (nextItems.length !== room.items.length) {
-        room.items = nextItems;
-        touch(room);
-      }
-      markApplied(room, opId);
-      return { result: success(toRoomState(room)), changed: true };
-    }
-
-    if (op === 'clearCompleted') {
-      const ids = new Set(
+  if (op === 'clearCompleted') {
+    const ids = Array.from(
+      new Set(
         (Array.isArray(body.itemIds) ? body.itemIds : [])
           .map((value) => cleanText(value, MAX_ID))
           .filter(Boolean),
+      ),
+    );
+
+    if (ids.length > 0) {
+      await rooms.updateOne(
+        {
+          _id: code,
+          items: { $elemMatch: { id: { $in: ids }, checked: true } },
+        },
+        {
+          // $in ist fuer den typisierten PullOperator nicht vorgesehen,
+          // MongoDB unterstuetzt es aber.
+          $pull: {
+            items: { id: { $in: ids }, checked: true },
+          } as unknown as { id: string },
+          $inc: { version: 1 },
+          $set: { updatedAt: Date.now() },
+          $push: { appliedOps: appliedOpsPush(opId) },
+        },
       );
-      if (ids.size > 0) {
-        const nextItems = room.items.filter(
-          (item) => !(ids.has(item.id) && item.checked),
-        );
-        if (nextItems.length !== room.items.length) {
-          room.items = nextItems;
-          touch(room);
-        }
-      }
-      markApplied(room, opId);
-      return { result: success(toRoomState(room)), changed: true };
     }
 
-    return {
-      result: failure('UNKNOWN_OP', 'Unbekannter Vorgang.'),
-      changed: false,
-    };
-  });
+    return currentState(rooms, code);
+  }
+
+  return failure('UNKNOWN_OP', 'Unbekannter Vorgang.');
+}
+
+export async function handleShoppingOperation(
+  input: unknown,
+): Promise<ShoppingApiResponse> {
+  try {
+    return await runOperation(input);
+  } catch (error) {
+    console.error('[shopping-store] Datenbankfehler:', error);
+
+    if (error instanceof Error && error.message === 'MONGODB_URI_MISSING') {
+      return failure(
+        'SERVER_MISCONFIGURED',
+        'Der Server ist noch nicht mit einer Datenbank verbunden.',
+        500,
+      );
+    }
+
+    return failure(
+      'DB_UNAVAILABLE',
+      'Der Server kann die Datenbank gerade nicht erreichen. Bitte in einem Moment erneut versuchen.',
+      503,
+    );
+  }
 }

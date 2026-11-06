@@ -21,6 +21,7 @@ import {
   withConnection,
   type ShoppingMutation,
 } from '../api/shoppingSync';
+import { loadSyncServerUrl } from '../api/syncServerSetting';
 import type {
   DiaryEntry,
   Food,
@@ -377,6 +378,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     loadSharedConnection().then(async (stored) => {
+      // Erst die Server-Adresse laden, damit der erste Abgleich nicht ins Leere
+      // läuft (im eigenständigen Build gibt es keinen Dev-Server).
+      await loadSyncServerUrl();
       if (!stored || cancelled) return;
 
       connectionRef.current = stored;
