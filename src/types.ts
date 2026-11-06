@@ -124,15 +124,3 @@ export interface Store {
   light: string;
   url: string;
 }
-
-export interface Offer {
-  id: string;
-  store: StoreId;
-  name: string;
-  detail: string;
-  price: number;
-  originalPrice?: number;
-  emoji: string;
-  category: ShoppingCategory;
-  badge?: string;
-}

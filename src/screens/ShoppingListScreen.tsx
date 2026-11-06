@@ -355,6 +355,7 @@ function ShoppingRow({
 const styles = StyleSheet.create({
   progressCard: {
     gap: spacing.md,
+    marginTop: spacing.md,
   },
   progressTop: {
     flexDirection: 'row',

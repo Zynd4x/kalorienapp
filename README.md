@@ -48,7 +48,7 @@ Der QR-Code enthält dann eine öffentliche `*.exp.direct`-Adresse und funktioni
 
 - **Heute:** Kalorienring, Makro-Balken, Wasser-Tracker, Mahlzeiten (Frühstück, Mittag, Abend, Snack) und Tagesnavigation.
 - **Scannen:** Barcode mit der Kamera scannen oder manuell eingeben. Nährwerte kommen von Open Food Facts; zusätzlich gibt es eine lokale Lebensmittel-Suche als Fallback.
-- **Prospekte:** Direktlinks zu den offiziellen Prospekten von Aldi, Edeka, REWE, Lidl, Penny, Netto und Kaufland sowie Beispielangebote, die sich mit einem Tipp zur Einkaufsliste hinzufügen lassen.
+- **Prospekte:** Übersichtliche Karten für die offiziellen Prospekte von Aldi, Edeka, REWE, Lidl, Penny, Netto und Kaufland. Ein Tipp öffnet den aktuellen Prospekt des Marktes im Browser.
 - **Einkaufsliste:** Artikel manuell oder per Schnellauswahl hinzufügen, nach Kategorien gruppiert, abhaken und erledigte Artikel löschen.
 - **Gemeinsame Einkaufsliste:** Raum mit Name und Passwort erstellen oder mit Raumcode und Passwort beitreten. Mehrere Personen können gleichzeitig Artikel hinzufügen, abhaken und löschen; die Liste gleicht sich automatisch ab.
 - **Rezepte:** Sechs Startrezepte, eigene Rezepte erstellen, Portionen anpassen und alle Zutaten in die Einkaufsliste übernehmen.
@@ -188,7 +188,7 @@ eintragen. Port 8787 muss in der Firewall freigegeben sein.
 ## Datenquellen und Hinweise
 
 - **Open Food Facts** (`world.openfoodfacts.org`): Produktdaten und Nährwerte. Die Datenbank ist community-gepflegt, Angaben können unvollständig oder abweichend sein. Bei Fehlern oder Rate-Limits zeigt die App lokale Vorschläge.
-- **Prospekte:** Es gibt keine kostenlose, offizielle Echtzeit-API für alle Handelsketten. Die App öffnet daher die offiziellen Prospekt-Seiten im Browser. Die angezeigten Angebote und Preise sind ausdrücklich **Beispielangebote**.
+- **Prospekte:** Es gibt keine kostenlose, offizielle Echtzeit-API für alle Handelsketten. Die App listet daher die Märkte als Karten und öffnet die offiziellen Prospekt-Seiten im Browser. Angebote und Preise werden nicht in der App gespeichert, sondern stammen direkt aus dem aktuellen Prospekt des Marktes.
 - **Barcode-Scannen:** Die Kamera funktioniert nur auf einem echten Gerät in Expo Go. Im Web-Browser wird stattdessen die manuelle Barcode-Eingabe bzw. Suche verwendet.
 - **Speicherung:** Tagebuch, Ziele und Einkaufsliste liegen lokal in AsyncStorage auf dem Gerät. Diese lokalen Daten werden nicht an Dritte übertragen. Über **Ziele → Alle Daten zurücksetzen** lassen sich die lokalen Daten löschen. Ausnahme ist die ausdrücklich aktivierte gemeinsame Einkaufsliste (siehe nächster Punkt).
 - **Gemeinsame Liste:** Die Raumdaten liegen in der MongoDB-Datenbank des selbst betriebenen Servers (z. B. MongoDB Atlas). Passwörter werden ausschließlich als scrypt-Hash gespeichert. Ohne eingerichteten Server bleiben alle anderen Funktionen lokal nutzbar.

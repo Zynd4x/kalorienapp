@@ -249,8 +249,9 @@ export function GoalsScreen() {
           <View style={styles.aboutText}>
             <Text style={styles.aboutTitle}>Prospekte</Text>
             <Text style={styles.aboutDescription}>
-              Die App verlinkt auf die offiziellen Prospekte der Märkte.
-              Beispielangebote ersetzen keine verbindlichen Preisangaben.
+              Die App listet die offiziellen Prospekte der Märkte und öffnet sie
+              im Browser. Angebote und Preise stammen direkt aus dem aktuellen
+              Prospekt des Marktes.
             </Text>
           </View>
         </View>
