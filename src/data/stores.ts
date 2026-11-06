@@ -6,7 +6,7 @@ export const stores: Store[] = [
     name: 'Aldi',
     color: '#00457C',
     light: '#E7F0F8',
-    url: 'https://www.aldi-sued.de/prospekte',
+    url: 'https://www.aldi-nord.de/prospekte.html',
   },
   {
     id: 'edeka',
