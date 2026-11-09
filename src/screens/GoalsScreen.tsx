@@ -261,8 +261,8 @@ export function GoalsScreen() {
       <Card style={styles.dangerCard}>
         <Text style={styles.dangerTitle}>Alle Daten zurücksetzen</Text>
         <Text style={styles.dangerText}>
-          Löscht Tagebuch, Einkaufsliste, eigene Rezepte und Ziele von diesem
-          Gerät.
+          Löscht Tagebuch, Einkaufsliste, eigene Rezepte, Ziele, Kundenkarten
+          und Coupons von diesem Gerät.
         </Text>
         <Button
           label="Daten zurücksetzen"

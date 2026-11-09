@@ -23,9 +23,12 @@ import {
 } from '../api/shoppingSync';
 import { loadSyncServerUrl } from '../api/syncServerSetting';
 import type {
+  BarcodeType,
+  CouponStatus,
   DiaryEntry,
   Food,
   Goals,
+  LoyaltyCard,
   Macros,
   Meal,
   Recipe,
@@ -34,6 +37,8 @@ import type {
   SharedRoomState,
   SharedStatus,
   ShoppingItem,
+  StoreCoupon,
+  StoreId,
 } from '../types';
 
 const DEFAULT_GOALS: Goals = {
@@ -49,6 +54,8 @@ const initialState: PersistedState = {
   shopping: [],
   recipes: seedRecipes,
   water: {},
+  loyaltyCards: [],
+  coupons: [],
 };
 
 const SYNC_INTERVAL_MS = 2000;
@@ -105,6 +112,20 @@ interface AppContextValue extends PersistedState {
   addRecipe: (recipe: Omit<Recipe, 'id' | 'createdAt' | 'isCustom'>) => string;
   deleteRecipe: (id: string) => void;
   addRecipeToShoppingList: (recipe: Recipe, servings: number) => number;
+  addLoyaltyCard: (input: {
+    storeId: StoreId;
+    label: string;
+    number: string;
+    barcodeType?: BarcodeType;
+    note?: string;
+  }) => string;
+  removeLoyaltyCard: (id: string) => void;
+  addCoupon: (
+    cardId: string,
+    input: { title: string; description?: string; validUntil?: string },
+  ) => void;
+  setCouponStatus: (id: string, status: CouponStatus) => void;
+  removeCoupon: (id: string) => void;
   resetAll: () => Promise<void>;
   sharedConnection: SharedConnection | null;
   sharedStatus: SharedStatus;
@@ -345,6 +366,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             stored.water && typeof stored.water === 'object'
               ? stored.water
               : current.water,
+          loyaltyCards: Array.isArray(stored.loyaltyCards)
+            ? stored.loyaltyCards
+            : current.loyaltyCards,
+          coupons: Array.isArray(stored.coupons)
+            ? stored.coupons
+            : current.coupons,
         }));
         if (Array.isArray(stored.shopping)) {
           shoppingRef.current = stored.shopping;
@@ -614,6 +641,79 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [enqueue, updateShopping],
   );
 
+  const addLoyaltyCard = useCallback(
+    (input: {
+      storeId: StoreId;
+      label: string;
+      number: string;
+      barcodeType?: BarcodeType;
+      note?: string;
+    }) => {
+      const id = createId('card');
+      const entry: LoyaltyCard = {
+        id,
+        storeId: input.storeId,
+        label: input.label.trim(),
+        number: input.number.trim(),
+        barcodeType: input.barcodeType ?? 'auto',
+        note: input.note?.trim() || undefined,
+        createdAt: Date.now(),
+      };
+      setState((current) => ({
+        ...current,
+        loyaltyCards: [entry, ...current.loyaltyCards],
+      }));
+      return id;
+    },
+    [],
+  );
+
+  const removeLoyaltyCard = useCallback((id: string) => {
+    setState((current) => ({
+      ...current,
+      loyaltyCards: current.loyaltyCards.filter((card) => card.id !== id),
+      coupons: current.coupons.filter((coupon) => coupon.cardId !== id),
+    }));
+  }, []);
+
+  const addCoupon = useCallback(
+    (
+      cardId: string,
+      input: { title: string; description?: string; validUntil?: string },
+    ) => {
+      const entry: StoreCoupon = {
+        id: createId('coupon'),
+        cardId,
+        title: input.title.trim(),
+        description: input.description?.trim() || undefined,
+        validUntil: input.validUntil?.trim() || undefined,
+        status: 'available',
+        createdAt: Date.now(),
+      };
+      setState((current) => ({
+        ...current,
+        coupons: [entry, ...current.coupons],
+      }));
+    },
+    [],
+  );
+
+  const setCouponStatus = useCallback((id: string, status: CouponStatus) => {
+    setState((current) => ({
+      ...current,
+      coupons: current.coupons.map((coupon) =>
+        coupon.id === id ? { ...coupon, status } : coupon,
+      ),
+    }));
+  }, []);
+
+  const removeCoupon = useCallback((id: string) => {
+    setState((current) => ({
+      ...current,
+      coupons: current.coupons.filter((coupon) => coupon.id !== id),
+    }));
+  }, []);
+
   const createSharedRoom = useCallback(
     async (name: string, password: string): Promise<SharedActionResult> => {
       const cleanName = name.trim();
@@ -785,6 +885,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addRecipe,
       deleteRecipe,
       addRecipeToShoppingList,
+      addLoyaltyCard,
+      removeLoyaltyCard,
+      addCoupon,
+      setCouponStatus,
+      removeCoupon,
       resetAll,
       sharedConnection,
       sharedStatus,
@@ -818,6 +923,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addRecipe,
       deleteRecipe,
       addRecipeToShoppingList,
+      addLoyaltyCard,
+      removeLoyaltyCard,
+      addCoupon,
+      setCouponStatus,
+      removeCoupon,
       resetAll,
       sharedConnection,
       sharedStatus,

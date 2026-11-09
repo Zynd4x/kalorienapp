@@ -1,5 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { DiaryEntry, Goals, Recipe, ShoppingItem } from '../types';
+import type {
+  DiaryEntry,
+  Goals,
+  LoyaltyCard,
+  Recipe,
+  ShoppingItem,
+  StoreCoupon,
+} from '../types';
 
 const STORAGE_KEY = '@kalorienkompass/state/v1';
 
@@ -9,6 +16,8 @@ export interface PersistedState {
   shopping: ShoppingItem[];
   recipes: Recipe[];
   water: Record<string, number>;
+  loyaltyCards: LoyaltyCard[];
+  coupons: StoreCoupon[];
 }
 
 export async function loadState(): Promise<Partial<PersistedState> | null> {

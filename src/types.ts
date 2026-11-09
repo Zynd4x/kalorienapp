@@ -124,3 +124,27 @@ export interface Store {
   light: string;
   url: string;
 }
+
+export type BarcodeType = 'auto' | 'code128' | 'ean13';
+
+export interface LoyaltyCard {
+  id: string;
+  storeId: StoreId;
+  label: string;
+  number: string;
+  barcodeType: BarcodeType;
+  note?: string;
+  createdAt: number;
+}
+
+export type CouponStatus = 'available' | 'activated' | 'redeemed';
+
+export interface StoreCoupon {
+  id: string;
+  cardId: string;
+  title: string;
+  description?: string;
+  validUntil?: string;
+  status: CouponStatus;
+  createdAt: number;
+}
