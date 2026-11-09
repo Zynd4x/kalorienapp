@@ -273,7 +273,7 @@ export function GoalsScreen() {
         />
       </Card>
 
-      <Text style={styles.version}>KalorienKompass · Version 1.0.0</Text>
+      <Text style={styles.version}>KalorienKompass · Version 1.1.0</Text>
     </Screen>
   );
 }

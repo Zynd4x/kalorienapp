@@ -129,7 +129,7 @@ android.defaultConfig {
 
 Beides ist nötig, weil AGP standardmäßig CMake 3.22 mit `-DCMAKE_OBJECT_PATH_MAX=1024` aufruft. Damit meldet CMake zu lange Pfade nur, verkürzt sie aber nicht – der Build bricht dann mit `ninja: error: mkdir(...): No such file or directory` ab. Mit CMake 3.31 und einem realistischen Grenzwert werden zu lange Objektnamen automatisch per MD5 gekürzt.
 
-Die fertige APK liegt danach unter `release/KalorienKompass-1.0.0.apk`.
+Die fertige APK liegt danach unter `release/KalorienKompass-1.1.0.apk`.
 
 Sie ist mit dem Debug-Schlüssel signiert und damit direkt installierbar, aber **nicht** für den Play Store geeignet. Für den Store bitte Variante A verwenden.
 
