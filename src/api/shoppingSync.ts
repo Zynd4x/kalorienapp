@@ -2,7 +2,11 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { getSyncServerUrl } from './syncServerSetting';
 import { DEFAULT_SYNC_SERVER_URL, formatSyncServer } from '../config/syncServer';
-import type { SharedRoomState, ShoppingItem } from '../types';
+import type {
+  SharedRoomState,
+  ShoppingCategory,
+  ShoppingItem,
+} from '../types';
 
 export interface ShoppingRequestBase {
   room: string;
@@ -34,6 +38,19 @@ export type ShoppingOperationPayload =
     } & ShoppingRequestBase)
   | ({ op: 'remove'; opId: string; itemId: string } & ShoppingRequestBase)
   | ({
+      op: 'update';
+      opId: string;
+      itemId: string;
+      name: string;
+      amount: string | null;
+      category: ShoppingCategory;
+    } & ShoppingRequestBase)
+  | ({
+      op: 'reorder';
+      opId: string;
+      orderedIds: string[];
+    } & ShoppingRequestBase)
+  | ({
       op: 'clearCompleted';
       opId: string;
       itemIds: string[];
@@ -44,6 +61,15 @@ export type ShoppingMutation =
   | { op: 'addMany'; opId: string; items: ShoppingItem[] }
   | { op: 'setChecked'; opId: string; itemId: string; checked: boolean }
   | { op: 'remove'; opId: string; itemId: string }
+  | {
+      op: 'update';
+      opId: string;
+      itemId: string;
+      name: string;
+      amount: string | null;
+      category: ShoppingCategory;
+    }
+  | { op: 'reorder'; opId: string; orderedIds: string[] }
   | { op: 'clearCompleted'; opId: string; itemIds: string[] };
 
 export interface ShoppingResponse {
@@ -89,6 +115,25 @@ export function withConnection(
         op: 'remove',
         opId: mutation.opId,
         itemId: mutation.itemId,
+        room,
+        password,
+      };
+    case 'update':
+      return {
+        op: 'update',
+        opId: mutation.opId,
+        itemId: mutation.itemId,
+        name: mutation.name,
+        amount: mutation.amount,
+        category: mutation.category,
+        room,
+        password,
+      };
+    case 'reorder':
+      return {
+        op: 'reorder',
+        opId: mutation.opId,
+        orderedIds: mutation.orderedIds,
         room,
         password,
       };

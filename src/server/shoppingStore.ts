@@ -457,6 +457,86 @@ async function runOperation(input: unknown): Promise<ShoppingApiResponse> {
     return currentState(rooms, code);
   }
 
+  if (op === 'update') {
+    const itemId = cleanText(body.itemId, MAX_ID);
+    const name = cleanText(body.name, MAX_ITEM_NAME);
+    const amount = cleanText(body.amount, MAX_ITEM_AMOUNT);
+    const rawCategory = body.category;
+    const category: ShoppingCategory = CATEGORIES.includes(
+      rawCategory as ShoppingCategory,
+    )
+      ? (rawCategory as ShoppingCategory)
+      : 'Sonstiges';
+
+    if (!itemId || !name) {
+      return failure(
+        'BAD_REQUEST',
+        'Der Artikel braucht einen Namen und eine Kennung.',
+      );
+    }
+
+    const changes: Record<string, unknown> = {
+      'items.$.name': name,
+      'items.$.category': category,
+      updatedAt: Date.now(),
+    };
+    const update: Record<string, unknown> = {
+      $set: changes,
+      $inc: { version: 1 },
+      $push: { appliedOps: appliedOpsPush(opId) },
+    };
+    if (amount) changes['items.$.amount'] = amount;
+    else update.$unset = { 'items.$.amount': '' };
+
+    await rooms.updateOne({ _id: code, 'items.id': itemId }, update);
+    return currentState(rooms, code);
+  }
+
+  if (op === 'reorder') {
+    const orderedIds = Array.from(
+      new Set(
+        (Array.isArray(body.orderedIds) ? body.orderedIds : [])
+          .map((value) => cleanText(value, MAX_ID))
+          .filter(Boolean),
+      ),
+    ).slice(0, MAX_ITEMS);
+
+    if (orderedIds.length > 0) {
+      // Die Reihenfolge wird nur gesetzt, wenn sich der Raum seit dem Lesen
+      // nicht geaendert hat. So gehen parallel hinzugefuegte Artikel nicht
+      // verloren; bei einer Kollision wird kurz erneut gelesen.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const fresh = await rooms.findOne({ _id: code });
+        if (!fresh) return roomNotFound();
+
+        const currentItems = fresh.items ?? [];
+        const byId = new Map(currentItems.map((item) => [item.id, item]));
+        const ordered: ShoppingItem[] = [];
+        for (const id of orderedIds) {
+          const item = byId.get(id);
+          if (!item) continue;
+          ordered.push(item);
+          byId.delete(id);
+        }
+        for (const item of currentItems) {
+          if (byId.has(item.id)) ordered.push(item);
+        }
+
+        const result = await rooms.updateOne(
+          { _id: code, version: fresh.version },
+          {
+            $set: { items: ordered, updatedAt: Date.now() },
+            $inc: { version: 1 },
+            $push: { appliedOps: appliedOpsPush(opId) },
+          },
+        );
+        if (result.matchedCount > 0) break;
+      }
+    }
+
+    return currentState(rooms, code);
+  }
+
   if (op === 'clearCompleted') {
     const ids = Array.from(
       new Set(

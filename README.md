@@ -50,8 +50,8 @@ Der QR-Code enthält dann eine öffentliche `*.exp.direct`-Adresse und funktioni
 - **Scannen:** Barcode mit der Kamera scannen oder manuell eingeben. Nährwerte kommen von Open Food Facts; zusätzlich gibt es eine lokale Lebensmittel-Suche als Fallback.
 - **Prospekte:** Übersichtliche Karten für die offiziellen Prospekte von Aldi, Edeka, REWE, Lidl, Penny, Netto und Kaufland. Ein Tipp öffnet den aktuellen Prospekt des Marktes im Browser.
 - **Kundenkarten & Coupons:** Pro Markt getrennte Kundenkarten mit Barcode-Anzeige sowie manuelle Coupon-Listen mit Status (verfügbar, aktiviert, eingelöst). Zugangsdaten werden nicht gespeichert; aktiviert werden Coupons weiterhin in der offiziellen App des Marktes.
-- **Einkaufsliste:** Artikel manuell oder per Schnellauswahl hinzufügen, nach Kategorien gruppiert, abhaken und erledigte Artikel löschen.
-- **Gemeinsame Einkaufsliste:** Raum mit Name und Passwort erstellen oder mit Raumcode und Passwort beitreten. Mehrere Personen können gleichzeitig Artikel hinzufügen, abhaken und löschen; die Liste gleicht sich automatisch ab.
+- **Einkaufsliste:** Artikel manuell oder per Schnellauswahl hinzufügen, nach Kategorien gruppiert, abhaken, bearbeiten (Name, Menge, Kategorie) und mit Hoch/Runter verschieben. Gelöscht wird nur über die Mülltonne, abgehakt nur über den Kasten links.
+- **Gemeinsame Einkaufsliste:** Raum mit Name und Passwort erstellen oder mit Raumcode und Passwort beitreten. Mehrere Personen können gleichzeitig Artikel hinzufügen, bearbeiten, verschieben, abhaken und löschen; die Liste gleicht sich automatisch ab.
 - **Rezepte:** Sechs Startrezepte, eigene Rezepte erstellen, Portionen anpassen und alle Zutaten in die Einkaufsliste übernehmen.
 - **Ziele:** Kalorien- und Makroziele bearbeiten, Daten zurücksetzen.
 
@@ -129,7 +129,7 @@ android.defaultConfig {
 
 Beides ist nötig, weil AGP standardmäßig CMake 3.22 mit `-DCMAKE_OBJECT_PATH_MAX=1024` aufruft. Damit meldet CMake zu lange Pfade nur, verkürzt sie aber nicht – der Build bricht dann mit `ninja: error: mkdir(...): No such file or directory` ab. Mit CMake 3.31 und einem realistischen Grenzwert werden zu lange Objektnamen automatisch per MD5 gekürzt.
 
-Die fertige APK liegt danach unter `release/KalorienKompass-1.1.0.apk`.
+Die fertige APK liegt danach unter `release/KalorienKompass-1.2.0.apk`.
 
 Sie ist mit dem Debug-Schlüssel signiert und damit direkt installierbar, aber **nicht** für den Play Store geeignet. Für den Store bitte Variante A verwenden.
 

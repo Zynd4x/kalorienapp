@@ -36,6 +36,7 @@ import type {
   SharedConnection,
   SharedRoomState,
   SharedStatus,
+  ShoppingCategory,
   ShoppingItem,
   StoreCoupon,
   StoreId,
@@ -107,6 +108,11 @@ interface AppContextValue extends PersistedState {
   addShoppingItem: (item: NewShoppingItem) => void;
   addShoppingItems: (items: NewShoppingItem[]) => number;
   toggleShoppingItem: (id: string) => void;
+  updateShoppingItem: (
+    id: string,
+    changes: { name: string; amount?: string; category: ShoppingCategory },
+  ) => void;
+  moveShoppingItem: (id: string, direction: 'up' | 'down') => void;
   removeShoppingItem: (id: string) => void;
   clearCompleted: () => void;
   addRecipe: (recipe: Omit<Recipe, 'id' | 'createdAt' | 'isCustom'>) => string;
@@ -184,6 +190,36 @@ function applyPendingOperations(
 
     if (operation.op === 'remove') {
       next = next.filter((item) => item.id !== operation.itemId);
+      continue;
+    }
+
+    if (operation.op === 'update') {
+      next = next.map((item) => {
+        if (item.id !== operation.itemId) return item;
+        const updated: ShoppingItem = {
+          ...item,
+          name: operation.name,
+          category: operation.category,
+        };
+        if (operation.amount) updated.amount = operation.amount;
+        else delete updated.amount;
+        return updated;
+      });
+      continue;
+    }
+
+    if (operation.op === 'reorder') {
+      const positions = new Map(
+        operation.orderedIds.map((id, index) => [id, index]),
+      );
+      next = [...next].sort((a, b) => {
+        const first = positions.get(a.id);
+        const second = positions.get(b.id);
+        if (first === undefined && second === undefined) return 0;
+        if (first === undefined) return 1;
+        if (second === undefined) return -1;
+        return first - second;
+      });
       continue;
     }
 
@@ -568,6 +604,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [enqueue, updateShopping],
   );
 
+  const updateShoppingItem = useCallback(
+    (
+      id: string,
+      changes: { name: string; amount?: string; category: ShoppingCategory },
+    ) => {
+      const name = changes.name.trim();
+      if (!name) return;
+      const amount = changes.amount?.trim() || undefined;
+
+      updateShopping((current) =>
+        current.map((item) => {
+          if (item.id !== id) return item;
+          const updated: ShoppingItem = {
+            ...item,
+            name,
+            category: changes.category,
+          };
+          if (amount) updated.amount = amount;
+          else delete updated.amount;
+          return updated;
+        }),
+      );
+      enqueue({
+        op: 'update',
+        opId: createOperationId(),
+        itemId: id,
+        name,
+        amount: amount ?? null,
+        category: changes.category,
+      });
+    },
+    [enqueue, updateShopping],
+  );
+
+  const moveShoppingItem = useCallback(
+    (id: string, direction: 'up' | 'down') => {
+      const current = shoppingRef.current;
+      const item = current.find((entry) => entry.id === id);
+      if (!item) return;
+
+      // Nachbarn in derselben Anzeigegruppe: offene Artikel je Kategorie,
+      // erledigte Artikel gemeinsam.
+      const group = current.filter((entry) =>
+        item.checked
+          ? entry.checked
+          : !entry.checked && entry.category === item.category,
+      );
+      const groupIndex = group.findIndex((entry) => entry.id === id);
+      const neighbour = group[groupIndex + (direction === 'up' ? -1 : 1)];
+      if (!neighbour) return;
+
+      const next = [...current];
+      const first = next.findIndex((entry) => entry.id === id);
+      const second = next.findIndex((entry) => entry.id === neighbour.id);
+      if (first < 0 || second < 0) return;
+      next[first] = neighbour;
+      next[second] = item;
+
+      updateShopping(() => next);
+      enqueue({
+        op: 'reorder',
+        opId: createOperationId(),
+        orderedIds: next.map((entry) => entry.id),
+      });
+    },
+    [enqueue, updateShopping],
+  );
+
   const removeShoppingItem = useCallback(
     (id: string) => {
       updateShopping((current) => current.filter((item) => item.id !== id));
@@ -880,6 +984,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addShoppingItem,
       addShoppingItems,
       toggleShoppingItem,
+      updateShoppingItem,
+      moveShoppingItem,
       removeShoppingItem,
       clearCompleted,
       addRecipe,
@@ -918,6 +1024,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addShoppingItem,
       addShoppingItems,
       toggleShoppingItem,
+      updateShoppingItem,
+      moveShoppingItem,
       removeShoppingItem,
       clearCompleted,
       addRecipe,

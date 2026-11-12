@@ -56,6 +56,8 @@ export function ShoppingListScreen() {
     shopping,
     addShoppingItem,
     toggleShoppingItem,
+    updateShoppingItem,
+    moveShoppingItem,
     removeShoppingItem,
     clearCompleted,
   } = useApp();
@@ -160,6 +162,12 @@ export function ShoppingListScreen() {
         />
       </Card>
 
+      {shopping.length > 0 ? (
+        <Text style={styles.listHint}>
+          Tippe auf einen Artikel, um ihn zu bearbeiten oder zu verschieben.
+        </Text>
+      ) : null}
+
       <SectionHeader title="Was fehlt noch?" />
       <Card style={styles.addCard}>
         <TextInput
@@ -239,10 +247,16 @@ export function ShoppingListScreen() {
                       key={item.id}
                       item={item}
                       divider={index > 0}
+                      canMoveUp={index > 0}
+                      canMoveDown={index < group.items.length - 1}
                       onToggle={() => {
                         toggleShoppingItem(item.id);
                         tapFeedback();
                       }}
+                      onMove={(direction) => moveShoppingItem(item.id, direction)}
+                      onSave={(changes) =>
+                        updateShoppingItem(item.id, changes)
+                      }
                       onRemove={() => removeShoppingItem(item.id)}
                     />
                   ))}
@@ -280,10 +294,14 @@ export function ShoppingListScreen() {
                     key={item.id}
                     item={item}
                     divider={index > 0}
+                    canMoveUp={index > 0}
+                    canMoveDown={index < done.length - 1}
                     onToggle={() => {
                       toggleShoppingItem(item.id);
                       tapFeedback();
                     }}
+                    onMove={(direction) => moveShoppingItem(item.id, direction)}
+                    onSave={(changes) => updateShoppingItem(item.id, changes)}
                     onRemove={() => removeShoppingItem(item.id)}
                   />
                 ))}
@@ -296,58 +314,247 @@ export function ShoppingListScreen() {
   );
 }
 
+interface ShoppingRowProps {
+  item: ShoppingItem;
+  divider: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onToggle: () => void;
+  onMove: (direction: 'up' | 'down') => void;
+  onSave: (changes: {
+    name: string;
+    amount?: string;
+    category: ShoppingCategory;
+  }) => void;
+  onRemove: () => void;
+}
+
 function ShoppingRow({
   item,
   divider,
+  canMoveUp,
+  canMoveDown,
   onToggle,
+  onMove,
+  onSave,
   onRemove,
-}: {
-  item: ShoppingItem;
-  divider: boolean;
-  onToggle: () => void;
-  onRemove: () => void;
-}) {
+}: ShoppingRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(item.name);
+  const [draftAmount, setDraftAmount] = useState(item.amount ?? '');
+  const [draftCategory, setDraftCategory] =
+    useState<ShoppingCategory>(item.category);
+
+  const openEditor = () => {
+    setDraftName(item.name);
+    setDraftAmount(item.amount ?? '');
+    setDraftCategory(item.category);
+    setEditing(true);
+  };
+
+  const closeEditor = () => setEditing(false);
+
+  const handleSave = () => {
+    const cleanName = draftName.trim();
+    if (!cleanName) return;
+    onSave({
+      name: cleanName,
+      amount: draftAmount.trim() || undefined,
+      category: draftCategory,
+    });
+    successFeedback();
+    setEditing(false);
+  };
+
   return (
     <View style={[styles.itemRow, divider && styles.itemDivider]}>
-      <Pressable onPress={onToggle} hitSlop={6} style={styles.checkboxHit}>
-        <View
-          style={[styles.checkbox, item.checked && styles.checkboxChecked]}
+      <View style={styles.itemMainRow}>
+        <Pressable
+          onPress={onToggle}
+          hitSlop={6}
+          style={styles.checkboxHit}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: item.checked }}
+          accessibilityLabel={
+            item.checked
+              ? `${item.name} wieder als offen markieren`
+              : `${item.name} als erledigt markieren`
+          }
         >
-          {item.checked ? (
-            <Ionicons name="checkmark" size={16} color={colors.white} />
-          ) : null}
-        </View>
-      </Pressable>
-      <Pressable onPress={onToggle} style={styles.itemTextWrap}>
-        <Text
-          style={[styles.itemName, item.checked && styles.itemNameChecked]}
-          numberOfLines={2}
+          <View
+            style={[styles.checkbox, item.checked && styles.checkboxChecked]}
+          >
+            {item.checked ? (
+              <Ionicons name="checkmark" size={16} color={colors.white} />
+            ) : null}
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={editing ? undefined : openEditor}
+          disabled={editing}
+          style={styles.itemTextWrap}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.name} bearbeiten`}
         >
-          {item.name}
-        </Text>
-        <View style={styles.itemMetaRow}>
-          {item.amount ? (
-            <Text style={styles.itemAmount}>{item.amount}</Text>
-          ) : null}
-          {item.recipeId ? (
-            <View style={styles.recipeBadge}>
-              <Ionicons
-                name="book-outline"
-                size={10}
-                color={colors.primary}
+          <Text
+            style={[styles.itemName, item.checked && styles.itemNameChecked]}
+            numberOfLines={2}
+          >
+            {item.name}
+          </Text>
+          <View style={styles.itemMetaRow}>
+            {item.amount ? (
+              <Text style={styles.itemAmount}>{item.amount}</Text>
+            ) : null}
+            {item.recipeId ? (
+              <View style={styles.recipeBadge}>
+                <Ionicons
+                  name="book-outline"
+                  size={10}
+                  color={colors.primary}
+                />
+                <Text style={styles.recipeBadgeText}>Rezept</Text>
+              </View>
+            ) : null}
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={editing ? closeEditor : openEditor}
+          hitSlop={8}
+          style={({ pressed }) => [styles.rowAction, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.name} bearbeiten`}
+        >
+          <Ionicons
+            name={editing ? 'chevron-up-circle-outline' : 'create-outline'}
+            size={19}
+            color={colors.primary}
+          />
+        </Pressable>
+
+        <Pressable
+          onPress={onRemove}
+          hitSlop={8}
+          style={({ pressed }) => [styles.rowAction, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.name} löschen`}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.muted} />
+        </Pressable>
+      </View>
+
+      {editing ? (
+        <View style={styles.editor}>
+          <TextInput
+            value={draftName}
+            onChangeText={setDraftName}
+            placeholder="Artikelname"
+            placeholderTextColor={colors.muted}
+            style={styles.editorInput}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleSave}
+          />
+          <TextInput
+            value={draftAmount}
+            onChangeText={setDraftAmount}
+            placeholder="Menge (optional), z. B. 1 l"
+            placeholderTextColor={colors.muted}
+            style={styles.editorInput}
+            returnKeyType="done"
+            onSubmitEditing={handleSave}
+          />
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryRow}
+          >
+            {CATEGORIES.map((entry) => (
+              <Chip
+                key={entry}
+                label={entry}
+                selected={draftCategory === entry}
+                onPress={() => setDraftCategory(entry)}
               />
-              <Text style={styles.recipeBadgeText}>Rezept</Text>
+            ))}
+          </ScrollView>
+
+          <View style={styles.moveRow}>
+            <Text style={styles.moveHint}>Reihenfolge</Text>
+            <View style={styles.moveButtons}>
+              <Pressable
+                onPress={() => onMove('up')}
+                disabled={!canMoveUp}
+                style={({ pressed }) => [
+                  styles.moveButton,
+                  !canMoveUp && styles.moveButtonDisabled,
+                  pressed && canMoveUp && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.name} nach oben verschieben`}
+              >
+                <Ionicons
+                  name="chevron-up"
+                  size={16}
+                  color={canMoveUp ? colors.text : colors.muted}
+                />
+                <Text
+                  style={[
+                    styles.moveLabel,
+                    !canMoveUp && styles.moveLabelDisabled,
+                  ]}
+                >
+                  Hoch
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => onMove('down')}
+                disabled={!canMoveDown}
+                style={({ pressed }) => [
+                  styles.moveButton,
+                  !canMoveDown && styles.moveButtonDisabled,
+                  pressed && canMoveDown && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.name} nach unten verschieben`}
+              >
+                <Ionicons
+                  name="chevron-down"
+                  size={16}
+                  color={canMoveDown ? colors.text : colors.muted}
+                />
+                <Text
+                  style={[
+                    styles.moveLabel,
+                    !canMoveDown && styles.moveLabelDisabled,
+                  ]}
+                >
+                  Runter
+                </Text>
+              </Pressable>
             </View>
-          ) : null}
+          </View>
+
+          <View style={styles.editorButtons}>
+            <Button
+              label="Speichern"
+              icon="checkmark"
+              onPress={handleSave}
+              disabled={!draftName.trim()}
+              style={styles.editorButton}
+            />
+            <Button
+              label="Abbrechen"
+              variant="outline"
+              onPress={closeEditor}
+              style={styles.editorButton}
+            />
+          </View>
         </View>
-      </Pressable>
-      <Pressable
-        onPress={onRemove}
-        hitSlop={8}
-        style={({ pressed }) => pressed && styles.pressed}
-      >
-        <Ionicons name="trash-outline" size={18} color={colors.muted} />
-      </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -392,6 +599,12 @@ const styles = StyleSheet.create({
   recipeButton: {
     marginTop: spacing.xs,
   },
+  listHint: {
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
   addCard: {
     gap: spacing.sm,
   },
@@ -423,11 +636,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   itemRow: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 11,
+  },
+  itemMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 13,
+    gap: spacing.sm,
   },
   itemDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -485,6 +700,72 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: colors.primary,
+  },
+  rowAction: {
+    padding: 2,
+  },
+  editor: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  editorInput: {
+    height: 42,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text,
+  },
+  moveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  moveHint: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  moveButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  moveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  moveButtonDisabled: {
+    opacity: 0.45,
+  },
+  moveLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  moveLabelDisabled: {
+    color: colors.muted,
+  },
+  editorButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  editorButton: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
   },
   allDoneCard: {
     marginTop: spacing.md,
